@@ -44,6 +44,10 @@ HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'es-ES,es;q=0.9',
     'Connection': 'keep-alive',
+        'Referer': 'https://www.idealista.com/',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Upgrade-Insecure-Requests': '1',
 }
 
 def extract_phone_from_text(text):
