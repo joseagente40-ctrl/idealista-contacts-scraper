@@ -24,7 +24,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ScraperAPI configuration
-SCRAPER_API_KEY = '64dea31d73dfeb4c9a2bf66a6c5cd25d'
+SCRAPER_API_KEY = '7976a485c58e38d0a3e1a41fe59c7da6'
 SCRAPER_API_URL = 'http://api.scraperapi.com'
 
 # Diccionario de ciudades disponibles para scraping
