@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Scraper de Contactos Idealista con Playwright
+Scraper de Contactos Idealista con ScraperAPI
 Extrae teléfonos y emails de viviendas de particulares en Idealista España
 """
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from datetime import datetime
 import logging
 import re
 import os
 import time
+import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
+
+# ScraperAPI configuration
+SCRAPER_API_KEY = '64dea31d73dfeb4c9a2bf66a6c5cd25d'
+SCRAPER_API_URL = 'http://api.scraperapi.com'
 
 # Diccionario de ciudades disponibles para scraping
 CIUDADES_ESPANA = {
@@ -36,6 +40,23 @@ CIUDADES_ESPANA = {
     'bilbao': 'https://www.idealista.com/venta-viviendas/bilbao/con-particulares/',
     'alicante': 'https://www.idealista.com/venta-viviendas/alicante-alicante/con-particulares/',
 }
+
+def fetch_with_scraperapi(url, render_js=True):
+    """Fetch URL content using ScraperAPI"""
+    params = {
+        'api_key': SCRAPER_API_KEY,
+        'url': url,
+        'render': 'true' if render_js else 'false',
+        'country_code': 'es'
+    }
+    
+    try:
+        response = requests.get(SCRAPER_API_URL, params=params, timeout=60)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        logger.error(f"Error fetching {url} with ScraperAPI: {e}")
+        raise
 
 def extract_phone_from_text(text):
     """Extrae números de teléfono del texto"""
@@ -83,22 +104,11 @@ def extract_email_from_text(text):
     emails = re.findall(pattern, text, re.IGNORECASE)
     return list(set(emails))
 
-def scrape_property_detail(page, property_url):
+def scrape_property_detail(property_url):
     """Scrape la página de detalle de una propiedad para extraer contactos"""
     try:
-        page.goto(property_url, wait_until='domcontentloaded', timeout=30000)
-        page.wait_for_timeout(2000)  # Esperar a que cargue contenido dinámico
-        
-        # Intentar encontrar y clickear el botón de contacto si existe
-        try:
-            contact_button = page.query_selector('button[data-test="contact-button"], .icon-phone, [class*="phone"], [class*="contact"]')
-            if contact_button:
-                contact_button.click()
-                page.wait_for_timeout(1500)
-        except Exception as e:
-            logger.debug(f"No contact button found or error clicking: {e}")
-        
-        html = page.content()
+        logger.info(f"Fetching property detail: {property_url}")
+        html = fetch_with_scraperapi(property_url, render_js=True)
         soup = BeautifulSoup(html, "html.parser")
         
         contacts = {
@@ -123,7 +133,7 @@ def scrape_property_detail(page, property_url):
         contacts['emails'] = list(set(contacts['emails']))
         
         return contacts
-        
+    
     except Exception as e:
         logger.error(f"Error scraping detail {property_url}: {e}")
         return {'phones': [], 'emails': []}
@@ -136,114 +146,76 @@ def build_search_url(base_url: str, page: int = 1) -> str:
 
 def scrape_idealista_contacts(base_url: str, page: int = 1, max_properties: int = 10):
     """Extrae contactos de propiedades de particulares en Idealista"""
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            headless=True,
-            args=[
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled'
-            ]
-        )
+    try:
+        search_url = build_search_url(base_url, page)
         
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            extra_http_headers={
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'es-ES,es;q=0.9',
-                'Connection': 'keep-alive',
-                'Referer': 'https://www.idealista.com/',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Upgrade-Insecure-Requests': '1'
-            }
-        )
+        logger.info(f"Fetching search results: {search_url}")
+        html = fetch_with_scraperapi(search_url, render_js=True)
+        soup = BeautifulSoup(html, "html.parser")
+        properties = []
         
-        try:
-            page_obj = context.new_page()
-            search_url = build_search_url(base_url, page)
+        for article in soup.find_all("article", class_="item"):
+            if len(properties) >= max_properties:
+                break
             
-            logger.info(f"Navigating to: {search_url}")
-            page_obj.goto(search_url, wait_until='domcontentloaded', timeout=30000)
-            page_obj.wait_for_timeout(3000)  # Esperar a que cargue todo
+            # Verificar que es de particular
+            seller_type = "Particular"
+            extra_info = article.select_one(".item-extra-info, .item-subtitle")
+            if extra_info:
+                extra_text = extra_info.get_text(strip=True)
+                if re.search(r"agencia|inmobiliaria", extra_text, re.I):
+                    continue  # Saltar agencias
             
-            # Aceptar cookies si aparecen
-            try:
-                cookie_button = page_obj.query_selector('button[id="didomi-notice-agree-button"], button[class*="accept"]')
-                if cookie_button:
-                    cookie_button.click()
-                    page_obj.wait_for_timeout(1000)
-            except Exception as e:
-                logger.debug(f"No cookie banner found: {e}")
+            title_el = article.select_one("a.item-link")
+            price_el = article.select_one(".item-price span, span.item-price")
+            location_el = article.select_one(".item-location")
             
-            html = page_obj.content()
-            soup = BeautifulSoup(html, "html.parser")
-            properties = []
+            url_rel = title_el["href"] if title_el and title_el.has_attr("href") else None
+            if url_rel and not url_rel.startswith("http"):
+                url_abs = "https://www.idealista.com" + url_rel
+            else:
+                url_abs = url_rel
             
-            for article in soup.find_all("article", class_="item"):
-                if len(properties) >= max_properties:
-                    break
-                
-                # Verificar que es de particular
-                seller_type = "Particular"
-                extra_info = article.select_one(".item-extra-info, .item-subtitle")
-                if extra_info:
-                    extra_text = extra_info.get_text(strip=True)
-                    if re.search(r"agencia|inmobiliaria", extra_text, re.I):
-                        continue  # Saltar agencias
-                
-                title_el = article.select_one("a.item-link")
-                price_el = article.select_one(".item-price span, span.item-price")
-                location_el = article.select_one(".item-location")
-                
-                url_rel = title_el["href"] if title_el and title_el.has_attr("href") else None
-                if url_rel and not url_rel.startswith("http"):
-                    url_abs = "https://www.idealista.com" + url_rel
-                else:
-                    url_abs = url_rel
-                
-                if not url_abs:
-                    continue
-                
-                # Extraer ID
-                id_match = re.search(r"/inmueble/(\d+)/", url_abs or "")
-                prop_id = id_match.group(1) if id_match else None
-                
-                # Scrape contactos de la página de detalle
-                logger.info(f"Scraping contacts for property {prop_id}...")
-                contacts = scrape_property_detail(page_obj, url_abs)
-                
-                # Solo añadir si tiene contactos
-                if contacts['phones'] or contacts['emails']:
-                    properties.append({
-                        "id": prop_id,
-                        "titulo": title_el.get_text(strip=True) if title_el else "",
-                        "precio": price_el.get_text(strip=True) if price_el else "",
-                        "ubicacion": location_el.get_text(" ", strip=True) if location_el else "",
-                        "url": url_abs,
-                        "telefonos": contacts['phones'],
-                        "emails": contacts['emails'],
-                        "fecha_scraping": datetime.now().isoformat()
-                    })
-                
-                # Pausa para evitar rate limiting
-                time.sleep(2)
+            if not url_abs:
+                continue
             
-            logger.info(f"Encontradas {len(properties)} propiedades con contactos")
-            return properties
+            # Extraer ID
+            id_match = re.search(r"/inmueble/(\d+)/", url_abs or "")
+            prop_id = id_match.group(1) if id_match else None
             
-        finally:
-            context.close()
-            browser.close()
+            # Scrape contactos de la página de detalle
+            logger.info(f"Scraping contacts for property {prop_id}...")
+            contacts = scrape_property_detail(url_abs)
+            
+            # Solo añadir si tiene contactos
+            if contacts['phones'] or contacts['emails']:
+                properties.append({
+                    "id": prop_id,
+                    "titulo": title_el.get_text(strip=True) if title_el else "",
+                    "precio": price_el.get_text(strip=True) if price_el else "",
+                    "ubicacion": location_el.get_text(" ", strip=True) if location_el else "",
+                    "url": url_abs,
+                    "telefonos": contacts['phones'],
+                    "emails": contacts['emails'],
+                    "fecha_scraping": datetime.now().isoformat()
+                })
+            
+            # Pausa para evitar rate limiting
+            time.sleep(2)
+        
+        logger.info(f"Found {len(properties)} properties with contacts")
+        return properties
+        
+    except Exception as e:
+        logger.error(f"Error in scrape_idealista_contacts: {e}")
+        raise
 
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'ok',
         'timestamp': datetime.now().isoformat(),
-        'service': 'Idealista Contacts Scraper API with Playwright'
+        'service': 'Idealista Contacts Scraper API with ScraperAPI'
     }), 200
 
 @app.route('/api/contacts/<city>', methods=['GET'])
@@ -267,9 +239,9 @@ def get_contacts(city='madrid'):
             'count': len(data),
             'data': data
         }), 200
-        
+    
     except Exception as e:
-        logger.error(f"Error en endpoint: {e}")
+        logger.error(f"Error in endpoint: {e}")
         return jsonify({
             'success': False,
             'error': str(e),
