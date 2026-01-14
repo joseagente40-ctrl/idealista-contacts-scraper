@@ -41,7 +41,7 @@ CIUDADES_ESPANA = {
     'alicante': 'https://www.idealista.com/venta-viviendas/alicante-alicante/con-particulares/',
 }
 
-def fetch_with_scraperapi(url, render_js=True):
+def fetch_with_scraperapi(url, render_js=False):
     """Fetch URL content using ScraperAPI"""
     params = {
         'api_key': SCRAPER_API_KEY,
