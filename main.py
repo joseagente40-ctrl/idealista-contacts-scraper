@@ -108,7 +108,7 @@ def scrape_property_detail(property_url):
     """Scrape la página de detalle de una propiedad para extraer contactos"""
     try:
         logger.info(f"Fetching property detail: {property_url}")
-        html = fetch_with_scraperapi(property_url, render_js=True)
+        html = fetch_with_scraperapi(property_url, render_js=False)
         soup = BeautifulSoup(html, "html.parser")
         
         contacts = {
@@ -150,7 +150,7 @@ def scrape_idealista_contacts(base_url: str, page: int = 1, max_properties: int 
         search_url = build_search_url(base_url, page)
         
         logger.info(f"Fetching search results: {search_url}")
-        html = fetch_with_scraperapi(search_url, render_js=True)
+        html = fetch_with_scraperapi(search_url, render_js=False)
         soup = BeautifulSoup(html, "html.parser")
         properties = []
         
