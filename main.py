@@ -149,7 +149,16 @@ def scrape_idealista_contacts(base_url: str, page: int = 1, max_properties: int 
         
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            extra_http_headers={
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9',
+                'Connection': 'keep-alive',
+                'Referer': 'https://www.idealista.com/',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Upgrade-Insecure-Requests': '1'
+            }
         )
         
         try:
